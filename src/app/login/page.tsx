@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
-import { MessageCircle } from "lucide-react";
+import { ArrowRight, Loader2 } from "lucide-react";
+import { Logo } from "@/components/ui";
 
 export default function Login() {
   const [password, setPassword] = useState("");
@@ -17,14 +18,17 @@ export default function Login() {
   };
 
   return (
-    <div className="grid min-h-dvh place-items-center px-4">
-      <form onSubmit={submit} className="card w-full max-w-sm p-8">
-        <div className="mb-6 grid h-12 w-12 place-items-center rounded-2xl bg-brand text-brand-ink"><MessageCircle /></div>
-        <h1 className="text-xl font-semibold">WhatsApp Inbox</h1>
-        <p className="mb-6 mt-1 text-sm text-ink-2">Sign in to manage chats and your AI agent.</p>
+    <div className="chat-wallpaper grid min-h-dvh place-items-center px-4">
+      <form onSubmit={submit} className="card anim-rise w-full max-w-sm p-8">
+        <Logo size={48} />
+        <h1 className="mt-6 text-xl font-semibold tracking-tight">DevMate Leads</h1>
+        <p className="mb-6 mt-1 text-sm text-ink-2">AI lead management for WhatsApp. Sign in to continue.</p>
         <input className="input" type="password" autoFocus placeholder="Dashboard password" value={password} onChange={(e) => setPassword(e.target.value)} />
         {error && <p className="mt-2 text-sm text-danger">{error}</p>}
-        <button className="btn btn-primary mt-4 w-full" disabled={busy || !password}>{busy ? "Signing in…" : "Sign in"}</button>
+        <button className="btn btn-primary mt-4 w-full" disabled={busy || !password}>
+          {busy ? <Loader2 size={16} className="animate-spin" /> : <>Sign in <ArrowRight size={16} /></>}
+        </button>
+        <p className="mt-6 text-center text-[11px] text-ink-3">Checkmate your goals · DevMate Solutions</p>
       </form>
     </div>
   );

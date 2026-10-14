@@ -2,6 +2,7 @@ import "server-only";
 import twilio from "twilio";
 import type { Author, Message } from "./types";
 import { getSettings, hasMessage, updateMessageStatus, upsertMessage } from "./store";
+import { scheduleLeadAnalysis } from "./leads";
 
 const SID = process.env.TWILIO_ACCOUNT_SID;
 const TOKEN = process.env.TWILIO_AUTH_TOKEN;
@@ -110,6 +111,7 @@ export async function importHistory(limit = 1000, since?: Date) {
       createdAt: (m.dateSent ?? m.dateCreated).toISOString(),
       error: m.errorMessage ?? undefined,
     }, { countUnread: inbound && Boolean(since) });
+    if (inbound && since) scheduleLeadAnalysis(customer);
     imported++;
   }
   return imported;

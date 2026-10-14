@@ -1,9 +1,11 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
-import { api, useLive } from "@/lib/client";
+import { api, STAGE_META, useLive } from "@/lib/client";
+import { LEAD_STAGES, type LeadStage } from "@/lib/types";
 
 type Stats = {
+  leads: { stages: Record<LeadStage, number>; avgScore: number | null; winRate: number | null; pipeline: number };
   totals: {
     conversations: number; open: number; needsHuman: number; aiActive: number;
     inbound: number; ai: number; agent: number; failed: number; automationRate: number;
@@ -28,11 +30,15 @@ export default function Analytics() {
   useLive((e) => { if (e.type === "message" || e.type === "poll") load(); });
 
   if (!s) return <div className="grid h-full place-items-center text-ink-3"><Loader2 className="animate-spin" /></div>;
+  const L = s.leads;
+  const funnelMax = Math.max(1, ...LEAD_STAGES.map((k) => L.stages[k]));
   const t = s.totals;
   const max = Math.max(1, ...s.days.map((d) => d.inbound + d.ai + d.agent));
 
   const tiles = [
-    { label: "Conversations", value: t.conversations.toLocaleString(), sub: `${t.open} open` },
+    { label: "Open pipeline", value: L.pipeline.toLocaleString(), sub: `${L.stages.hot} hot · ${L.stages.qualified} qualified` },
+    { label: "Win rate", value: L.winRate == null ? "—" : `${L.winRate}%`, sub: `${L.stages.won} won · ${L.stages.lost} lost` },
+    { label: "Avg lead score", value: L.avgScore == null ? "—" : String(L.avgScore), sub: `${t.conversations} conversations · ${t.open} open` },
     { label: "Need a human", value: t.needsHuman.toLocaleString(), sub: `${t.handoffs} handoffs total`, warn: t.needsHuman > 0 },
     { label: "Automation rate", value: `${t.automationRate}%`, sub: "replies sent by AI" },
     { label: "Median first response", value: fmtMs(t.medianResponseMs), sub: `AI generates in ${fmtMs(t.avgAiLatencyMs)}` },
@@ -43,10 +49,10 @@ export default function Analytics() {
   return (
     <div className="scroll-thin h-full overflow-y-auto">
       <div className="mx-auto max-w-6xl px-4 py-6 md:px-8">
-        <h1 className="text-2xl font-semibold">Analytics</h1>
-        <p className="mb-6 text-sm text-ink-2">How your WhatsApp channel and AI agent are performing.</p>
+        <h1 className="text-2xl font-semibold tracking-tight">Analytics</h1>
+        <p className="mb-6 text-sm text-ink-2">How your leads, WhatsApp channel and AI agent are performing.</p>
 
-        <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-3">
+        <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
           {tiles.map((x) => (
             <div key={x.label} className="card p-4">
               <div className="text-xs font-medium text-ink-2">{x.label}</div>
@@ -55,6 +61,21 @@ export default function Analytics() {
             </div>
           ))}
         </div>
+
+        <section className="card mb-6 p-5">
+          <h2 className="mb-4 font-semibold">Lead funnel</h2>
+          <div className="space-y-2.5">
+            {LEAD_STAGES.map((k) => (
+              <div key={k} className="flex items-center gap-3 text-sm">
+                <span className="w-20 shrink-0 text-ink-2">{STAGE_META[k].label}</span>
+                <div className="h-7 flex-1 overflow-hidden rounded-lg bg-panel-2">
+                  <div className={`h-full rounded-lg ${STAGE_META[k].dot} transition-all`} style={{ width: `${(L.stages[k] / funnelMax) * 100}%`, minWidth: L.stages[k] ? 6 : 0, opacity: k === "lost" ? 1 : 0.9 }} />
+                </div>
+                <span className="w-8 text-right font-semibold tabular-nums">{L.stages[k]}</span>
+              </div>
+            ))}
+          </div>
+        </section>
 
         <section className="card p-5">
           <div className="mb-4 flex flex-wrap items-center gap-4">

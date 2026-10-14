@@ -1,6 +1,10 @@
-# WhatsApp Inbox — Twilio + Claude AI agent dashboard
+# DevMate Leads — AI lead management on WhatsApp
 
-A Next.js dashboard for your Twilio WhatsApp number:
+A Next.js dashboard for your Twilio WhatsApp number, in the DevMate Solutions theme (light and dark):
+
+- **AI lead scoring** — after each burst of customer messages, Claude scores the chat 0–100, sets its stage (New → Qualified → Hot), and pulls out email, company, budget, interest, a one-line summary and the next step. Without an API key it falls back to keyword rules. A stage you set by hand sticks.
+- **Pipeline** — a kanban of every lead by stage (New · Qualified · Hot · Won · Lost). Drag cards to move them; Won/Lost resolves the chat.
+- **Command palette** — ⌘K jumps to any lead, page or action. Inbox shortcuts: J/K move, / search, R reply, E resolve, I lead panel; ⌥1–5 switch pages.
 
 - **Inbox** — every WhatsApp chat, live (new messages show up without refreshing), with read/delivered ticks, media, unread counts, search and filters (Unread · Needs human · AI · Manual · Resolved).
 - **Agent control** — a global on/off switch, plus a per-chat **AI ↔ Manual** switch. Typing a reply yourself pauses the AI for that chat; "Give back to AI" turns it back on.
@@ -9,7 +13,7 @@ A Next.js dashboard for your Twilio WhatsApp number:
 - **24-hour window** — WhatsApp only allows free-form replies within 24h of the customer's last message; after that the composer switches to sending your approved templates.
 - **History** — search all messages by text, phone, author and date; export to CSV. **Sync** imports your past messages from Twilio.
 - **Agent settings** — persona and instructions (system prompt), model (Claude Opus 5.5 / Sonnet 5.5 / Haiku 5.5), effort, context length, handoff rules, business hours, and a live activity log.
-- **Analytics** — automation rate, response times, handoffs, failures, and messages per day.
+- **Analytics** — lead funnel, win rate, average lead score, automation rate, response times, handoffs, failures, and messages per day.
 
 Without Twilio credentials it runs in **demo mode** with sample chats, so you can explore it first.
 

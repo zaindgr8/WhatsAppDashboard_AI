@@ -28,10 +28,14 @@ export const DEFAULT_SETTINGS: Settings = {
   businessHoursOnly: false,
   businessHours: { start: "09:00", end: "18:00", timezone: "UTC" },
   outOfHoursMessage: "Thanks for your message! We're currently closed and will get back to you during business hours.",
+  leadScoring: true,
+  leadCriteria: `A qualified lead has a clear need we can solve and shares contact details or asks about pricing.
+A hot lead mentions budget, a timeline, or asks to book a call or meeting.`,
 };
 
 type Global = typeof globalThis & {
   __waDb?: DB;
+  __waIndex?: Index;
   __waBus?: EventEmitter;
   __waSaveTimer?: NodeJS.Timeout;
 };
@@ -39,6 +43,25 @@ const g = globalThis as Global;
 
 export const bus: EventEmitter = g.__waBus ?? (g.__waBus = new EventEmitter());
 bus.setMaxListeners(100);
+
+// Messages grouped per chat and by id, so opening a chat or checking a SID doesn't scan every message.
+interface Index {
+  byConv: Map<string, Message[]>;
+  byId: Map<string, Message>;
+}
+function index(): Index {
+  if (g.__waIndex) return g.__waIndex;
+  const byConv = new Map<string, Message[]>();
+  const byId = new Map<string, Message>();
+  for (const m of load().messages) {
+    byId.set(m.id, m);
+    const list = byConv.get(m.conversationId);
+    if (list) list.push(m);
+    else byConv.set(m.conversationId, [m]);
+  }
+  for (const list of byConv.values()) list.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  return (g.__waIndex = { byConv, byId });
+}
 
 function load(): DB {
   if (g.__waDb) return g.__waDb;
@@ -130,23 +153,29 @@ export function updateConversation(id: string, patch: Partial<Conversation>): Co
 
 // ---------- messages ----------
 export function getMessages(conversationId: string): Message[] {
-  return load()
-    .messages.filter((m) => m.conversationId === conversationId)
-    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  return index().byConv.get(conversationId) ?? [];
 }
 
 export function hasMessage(id: string) {
-  return load().messages.some((m) => m.id === id);
+  return index().byId.has(id);
 }
 
 /** Insert or update a message and keep the conversation summary in sync. */
 export function upsertMessage(msg: Message, opts: { countUnread?: boolean } = {}): Message {
   const d = load();
-  const existing = d.messages.find((m) => m.id === msg.id);
+  const idx = index();
+  const existing = idx.byId.get(msg.id);
   if (existing) {
     Object.assign(existing, msg);
   } else {
     d.messages.push(msg);
+    idx.byId.set(msg.id, msg);
+    const list = idx.byConv.get(msg.conversationId) ?? [];
+    // Keep the chat sorted; new messages almost always belong at the end.
+    let i = list.length;
+    while (i > 0 && list[i - 1].createdAt > msg.createdAt) i--;
+    list.splice(i, 0, msg);
+    idx.byConv.set(msg.conversationId, list);
   }
   const c = ensureConversation(msg.conversationId);
   if (msg.createdAt >= c.lastMessageAt || !c.lastMessagePreview) {
@@ -166,7 +195,7 @@ export function upsertMessage(msg: Message, opts: { countUnread?: boolean } = {}
 }
 
 export function updateMessageStatus(id: string, status: string, error?: string) {
-  const m = load().messages.find((x) => x.id === id);
+  const m = index().byId.get(id);
   if (!m || (m.status === status && !error)) return;
   m.status = status;
   if (error) m.error = error;

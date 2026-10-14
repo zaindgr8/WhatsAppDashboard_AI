@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { AlertCircle, Bot, CheckCircle2, Copy, Forward, Hand, Loader2, Pause, Play, SkipForward, Workflow } from "lucide-react";
+import { AlertCircle, Bot, CheckCircle2, Copy, Forward, Hand, Loader2, Pause, Play, SkipForward, Target, Workflow } from "lucide-react";
 import { api, timeAgo, useLive } from "@/lib/client";
 import type { AgentEvent, Settings } from "@/lib/types";
 
@@ -48,8 +48,8 @@ export default function AgentPage() {
       <div className="mx-auto max-w-6xl px-4 py-6 md:px-8">
         <div className="mb-6 flex flex-wrap items-center gap-4">
           <div>
-            <h1 className="text-2xl font-semibold">AI Agent</h1>
-            <p className="text-sm text-ink-2">Control who answers your WhatsApp customers.</p>
+            <h1 className="text-2xl font-semibold tracking-tight">AI Agent</h1>
+            <p className="text-sm text-ink-2">Control who answers your WhatsApp leads, and how they&apos;re qualified.</p>
           </div>
           <button onClick={() => { set("agentEnabled", !s.agentEnabled); save({ agentEnabled: !s.agentEnabled }); }}
             className={`btn ml-auto ${s.agentEnabled ? "" : "btn-primary"}`}>
@@ -57,7 +57,7 @@ export default function AgentPage() {
           </button>
         </div>
 
-        <div className={`mb-6 flex items-center gap-3 rounded-2xl px-5 py-4 ${s.agentEnabled ? "bg-brand-soft text-brand" : "bg-warn-soft text-warn"}`}>
+        <div className={`mb-6 flex items-center gap-3 rounded-2xl px-5 py-4 ${s.agentEnabled ? "bg-ok-soft text-ok" : "bg-warn-soft text-warn"}`}>
           {s.agentEnabled ? <Bot size={22} /> : <Pause size={22} />}
           <div className="text-sm">
             <b>{s.agentEnabled ? "Agent is live." : "Agent is paused."}</b>{" "}
@@ -138,6 +138,20 @@ export default function AgentPage() {
               <input className="input" value={s.handoffKeywords.join(", ")} onChange={(e) => set("handoffKeywords", e.target.value.split(",").map((x) => x.trim()).filter(Boolean))} />
               <span className="mb-1 mt-3 block text-xs font-medium text-ink-2">Message sent to the customer on handoff</span>
               <textarea className="input min-h-20" value={s.handoffMessage} onChange={(e) => set("handoffMessage", e.target.value)} />
+            </Card>
+
+            <Card title="Lead scoring" hint="After each burst of customer messages, the AI scores the chat 0–100, sets its stage (New → Qualified → Hot), and pulls out email, company, budget and the next step. Runs on Claude — also when n8n is the agent.">
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={s.leadScoring} onChange={(e) => set("leadScoring", e.target.checked)} className="h-4 w-4 accent-[var(--brand)]" />
+                <Target size={15} className="text-brand" /> Score leads automatically
+              </label>
+              {s.leadScoring && (
+                <>
+                  <span className="mb-1 mt-3 block text-xs font-medium text-ink-2">What a good lead looks like for you</span>
+                  <textarea className="input min-h-24" value={s.leadCriteria} onChange={(e) => set("leadCriteria", e.target.value)} />
+                  {!env.aiConfigured && <p className="mt-1.5 text-xs text-warn">No ANTHROPIC_API_KEY — using simple keyword rules until a key is added.</p>}
+                </>
+              )}
             </Card>
 
             <Card title="Business hours">

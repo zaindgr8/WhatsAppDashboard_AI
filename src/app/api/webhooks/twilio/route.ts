@@ -1,6 +1,7 @@
 import { ensureConversation, upsertMessage } from "@/lib/store";
 import { onInboundMessage } from "@/lib/agent";
 import { verifyTwilio } from "@/lib/twilio";
+import { scheduleLeadAnalysis } from "@/lib/leads";
 import type { Media } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -36,6 +37,7 @@ export async function POST(req: Request) {
     { countUnread: true },
   );
 
+  scheduleLeadAnalysis(from);
   const reply = await onInboundMessage(from, params.Body || "", raw);
   return reply ?? new Response(EMPTY_TWIML, { headers: { "Content-Type": "text/xml" } });
 }

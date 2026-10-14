@@ -34,6 +34,28 @@ export interface Conversation {
   lastMessagePreview: string;
   lastInboundAt?: string;
   createdAt: string;
+  lead?: Lead;
+}
+
+export const LEAD_STAGES = ["new", "qualified", "hot", "won", "lost"] as const;
+export type LeadStage = (typeof LEAD_STAGES)[number];
+
+/** What the AI has learned about this contact as a sales lead. */
+export interface Lead {
+  stage: LeadStage;
+  /** 0–100 likelihood to convert. */
+  score: number;
+  intent: string;
+  summary: string;
+  interest: string;
+  budget: string;
+  email: string;
+  company: string;
+  nextStep: string;
+  /** Set when a teammate moved the stage by hand; the AI then stops changing it. */
+  stageLocked?: boolean;
+  source: "ai" | "rules";
+  analyzedAt: string;
 }
 
 export type AgentModel = "claude-opus-5-5" | "claude-sonnet-5-5" | "claude-haiku-5-5";
@@ -56,6 +78,10 @@ export interface Settings {
   businessHoursOnly: boolean;
   businessHours: { start: string; end: string; timezone: string };
   outOfHoursMessage: string;
+  /** Score and summarise every chat as a lead after new customer messages. */
+  leadScoring: boolean;
+  /** What a qualified lead looks like for this business (fed to the scorer). */
+  leadCriteria: string;
 }
 
 export type AgentEventType = "reply" | "forwarded" | "handoff" | "skipped" | "error";

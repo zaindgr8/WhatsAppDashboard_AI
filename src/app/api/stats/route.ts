@@ -44,7 +44,24 @@ export async function GET() {
   const replies = events.filter((e) => e.type === "reply");
   const latency = replies.filter((e) => e.latencyMs).map((e) => e.latencyMs!);
 
+  // Lead funnel
+  const stages = { new: 0, qualified: 0, hot: 0, won: 0, lost: 0 };
+  let scored = 0, scoreSum = 0;
+  for (const c of convs) {
+    if (!c.lead) continue;
+    stages[c.lead.stage]++;
+    scored++;
+    scoreSum += c.lead.score;
+  }
+  const closed = stages.won + stages.lost;
+
   return NextResponse.json({
+    leads: {
+      stages,
+      avgScore: scored ? Math.round(scoreSum / scored) : null,
+      winRate: closed ? Math.round((stages.won / closed) * 100) : null,
+      pipeline: stages.new + stages.qualified + stages.hot,
+    },
     totals: {
       conversations: convs.length,
       open: convs.filter((c) => c.status === "open").length,

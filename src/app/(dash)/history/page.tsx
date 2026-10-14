@@ -36,7 +36,7 @@ export default function HistoryPage() {
       <div className="border-b border-line bg-panel px-4 py-4 md:px-8">
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <div>
-            <h1 className="text-2xl font-semibold">Chat history</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">Chat history</h1>
             <p className="text-sm text-ink-2">Search every WhatsApp message across all conversations.</p>
           </div>
           <a href={`/api/history?${params()}&format=csv`} className="btn ml-auto"><Download size={16} /> Export CSV</a>
