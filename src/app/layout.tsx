@@ -8,6 +8,15 @@ const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"]
 export const metadata: Metadata = {
   title: "DevMate Leads",
   description: "AI lead management on WhatsApp — live chats, lead scoring, pipeline and an AI agent. By DevMate Solutions.",
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/icon.png", type: "image/png", sizes: "256x256" },
+    ],
+    apple: [
+      { url: "/apple-icon.png", sizes: "256x256", type: "image/png" },
+    ],
+  },
 };
 
 export const viewport: Viewport = {
