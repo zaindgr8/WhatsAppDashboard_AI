@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
-import { db, listAgentEvents } from "@/lib/store";
+import { allMessages, listAgentEvents, listConversations } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const { messages, conversations } = db();
-  const convs = Object.values(conversations);
+  const [messages, convs, events] = await Promise.all([allMessages(), listConversations(), listAgentEvents(1000)]);
   const DAY = 86_400_000;
   const since = Date.now() - 14 * DAY;
 
@@ -40,7 +39,6 @@ export async function GET() {
   }
   responseTimes.sort((a, b) => a - b);
 
-  const events = listAgentEvents(1000);
   const replies = events.filter((e) => e.type === "reply");
   const latency = replies.filter((e) => e.latencyMs).map((e) => e.latencyMs!);
 

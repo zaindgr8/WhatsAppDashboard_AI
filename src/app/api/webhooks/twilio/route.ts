@@ -22,8 +22,8 @@ export async function POST(req: Request) {
     if (params[`MediaUrl${i}`]) media.push({ url: params[`MediaUrl${i}`], contentType: params[`MediaContentType${i}`] || "" });
   }
 
-  ensureConversation(from, params.ProfileName || "");
-  upsertMessage(
+  await ensureConversation(from, params.ProfileName || "");
+  await upsertMessage(
     {
       id: params.MessageSid || params.SmsMessageSid || crypto.randomUUID(),
       conversationId: from,
@@ -37,7 +37,7 @@ export async function POST(req: Request) {
     { countUnread: true },
   );
 
-  scheduleLeadAnalysis(from);
+  await scheduleLeadAnalysis(from);
   const reply = await onInboundMessage(from, params.Body || "", raw);
   return reply ?? new Response(EMPTY_TWIML, { headers: { "Content-Type": "text/xml" } });
 }

@@ -4,5 +4,5 @@ import { listAgentEvents } from "@/lib/store";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return NextResponse.json(listAgentEvents(200));
+  return NextResponse.json(await listAgentEvents(200));
 }

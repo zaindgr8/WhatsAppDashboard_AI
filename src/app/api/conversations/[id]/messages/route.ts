@@ -13,7 +13,7 @@ export async function POST(req: Request, { params }: Ctx) {
   };
   if (!body?.trim() && !contentSid) return NextResponse.json({ error: "Message is empty" }, { status: 400 });
 
-  const conv = getConversation(id) ?? ensureConversation(id);
+  const conv = (await getConversation(id)) ?? (await ensureConversation(id));
   if (twilioConfigured && !contentSid && !sessionOpen(conv.lastInboundAt)) {
     // WhatsApp rejects free-form messages outside the 24h customer-service window.
     return NextResponse.json({ error: "The 24-hour WhatsApp window is closed. Send an approved template instead." }, { status: 409 });
@@ -22,7 +22,7 @@ export async function POST(req: Request, { params }: Ctx) {
   try {
     const msg = await sendWhatsApp({ to: id, body: body?.trim(), author: "agent", contentSid, contentVariables });
     // A human replying takes over the chat, so the AI doesn't talk over them.
-    updateConversation(id, { unread: 0, needsHuman: false, ...(pauseAi ? { aiEnabled: false } : {}) });
+    await updateConversation(id, { unread: 0, needsHuman: false, ...(pauseAi ? { aiEnabled: false } : {}) });
     return NextResponse.json(msg);
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Send failed" }, { status: 502 });

@@ -35,7 +35,8 @@ npm run dev                  # http://localhost:3000
 | `PUBLIC_BASE_URL` | The public URL of this app (ngrok or your deployed domain) |
 | `ANTHROPIC_API_KEY` | console.anthropic.com → API keys |
 | `N8N_WEBHOOK_URL` | Optional. Your n8n WhatsApp workflow's webhook. Messages are forwarded to it |
-| `DATA_DIR` | Optional. Where chats are stored (default `./data`) |
+| `SUPABASE_URL` | Your Supabase project URL. Chats, settings and agent activity are stored there |
+| `SUPABASE_SECRET_KEY` | Supabase secret key (server-only). Run `supabase/schema.sql` once in the SQL Editor first |
 | `DASHBOARD_PASSWORD` | Any password; protects the dashboard (leave empty to disable locally) |
 
 ## 3. Connect Twilio to the dashboard
@@ -74,4 +75,6 @@ Note: n8n doesn't see the messages you send from the dashboard, so its memory of
 
 ## Deploying
 
-Data is stored in `data/db.json`, so run it on a host with a persistent disk (a VPS, Railway or Render with a volume, or `npm run build && npm start` on your own server). On serverless hosts like Vercel the file and the live updates won't persist. For that, move `src/lib/store.ts` onto Postgres or Supabase; it's the only file that touches storage.
+All data lives in Supabase, so it works on Vercel or any other host. Add `SUPABASE_URL` and `SUPABASE_SECRET_KEY` to the host's environment variables. To copy chats from an older install's `storage/db.json`, run `node --env-file=.env.local scripts/migrate-to-supabase.mjs`.
+
+On Vercel, new messages sent by n8n are pulled from Twilio whenever the dashboard refreshes (about every 20 seconds), because background timers don't run between requests there.

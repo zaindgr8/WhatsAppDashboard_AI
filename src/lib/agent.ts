@@ -46,8 +46,8 @@ export interface Reply {
 }
 
 export async function generateReply(conversationId: string): Promise<Reply> {
-  const s = getSettings();
-  const messages = toClaudeMessages(getMessages(conversationId).slice(-s.historyLimit));
+  const s = await getSettings();
+  const messages = toClaudeMessages((await getMessages(conversationId)).slice(-s.historyLimit));
   if (!messages.length) throw new Error("No customer message to reply to.");
 
   const supportsFallback = s.model !== "claude-haiku-5-5";
@@ -97,9 +97,9 @@ function withinBusinessHours(s: Settings) {
 }
 
 async function handoff(conversationId: string, reason: string, notifyCustomer: boolean) {
-  const s = getSettings();
-  updateConversation(conversationId, { aiEnabled: false, needsHuman: true, handoffReason: reason });
-  logAgentEvent({ conversationId, type: "handoff", detail: reason });
+  const s = await getSettings();
+  await updateConversation(conversationId, { aiEnabled: false, needsHuman: true, handoffReason: reason });
+  await logAgentEvent({ conversationId, type: "handoff", detail: reason });
   if (notifyCustomer && s.handoffMessage) await sendWhatsApp({ to: conversationId, body: s.handoffMessage, author: "ai" });
 }
 
@@ -113,17 +113,16 @@ const timers = (g.__waTimers ??= new Map());
  * (n8n's response is passed through so TwiML replies from the workflow keep working).
  */
 export async function onInboundMessage(conversationId: string, body: string, rawBody: string): Promise<Response | null> {
-  const s = getSettings();
-  const conv = getConversation(conversationId);
+  const [s, conv] = await Promise.all([getSettings(), getConversation(conversationId)]);
   if (!conv) return null;
 
   const who = s.agentMode === "n8n" ? "n8n" : "AI";
   if (!s.agentEnabled) {
-    logAgentEvent({ conversationId, type: "skipped", detail: `Agent is paused globally — not sent to ${who}.` });
+    await logAgentEvent({ conversationId, type: "skipped", detail: `Agent is paused globally — not sent to ${who}.` });
     return null;
   }
   if (!conv.aiEnabled) {
-    logAgentEvent({ conversationId, type: "skipped", detail: `${who} is off for this chat (human mode).` });
+    await logAgentEvent({ conversationId, type: "skipped", detail: `${who} is off for this chat (human mode).` });
     return null;
   }
 
@@ -136,11 +135,11 @@ export async function onInboundMessage(conversationId: string, body: string, raw
 
   if (s.businessHoursOnly && !withinBusinessHours(s)) {
     await sendWhatsApp({ to: conversationId, body: s.outOfHoursMessage, author: "ai" }).catch(console.error);
-    logAgentEvent({ conversationId, type: "skipped", detail: "Outside business hours — sent out-of-hours message." });
+    await logAgentEvent({ conversationId, type: "skipped", detail: "Outside business hours — sent out-of-hours message." });
     return null;
   }
 
-  if (s.agentMode === "n8n") return forwardToN8n(conversationId, rawBody);
+  if (s.agentMode === "n8n") return forwardToN8n(conversationId, rawBody, s.forwardUrl);
 
   clearTimeout(timers.get(conversationId));
   timers.set(
@@ -154,10 +153,9 @@ export async function onInboundMessage(conversationId: string, body: string, raw
 }
 
 /** Pass Twilio's original webhook payload to the n8n workflow, unchanged. */
-async function forwardToN8n(conversationId: string, rawBody: string): Promise<Response | null> {
-  const url = getSettings().forwardUrl;
+async function forwardToN8n(conversationId: string, rawBody: string, url: string): Promise<Response | null> {
   if (!url) {
-    logAgentEvent({ conversationId, type: "error", detail: "n8n webhook URL is not set (Agent page)." });
+    await logAgentEvent({ conversationId, type: "error", detail: "n8n webhook URL is not set (Agent page)." });
     return null;
   }
   const started = Date.now();
@@ -170,7 +168,7 @@ async function forwardToN8n(conversationId: string, rawBody: string): Promise<Re
       signal: AbortSignal.timeout(Number(process.env.FORWARD_TIMEOUT_MS ?? 12_000)),
     });
     const text = await res.text();
-    logAgentEvent({
+    await logAgentEvent({
       conversationId,
       type: res.ok ? "forwarded" : "error",
       detail: res.ok ? `Sent to n8n (HTTP ${res.status}).` : `n8n returned HTTP ${res.status}: ${text.slice(0, 150)}`,
@@ -184,7 +182,7 @@ async function forwardToN8n(conversationId: string, rawBody: string): Promise<Re
     return null;
   } catch (err) {
     const timedOut = err instanceof Error && err.name === "TimeoutError";
-    logAgentEvent({
+    await logAgentEvent({
       conversationId,
       type: timedOut ? "forwarded" : "error",
       detail: timedOut
@@ -199,12 +197,12 @@ async function forwardToN8n(conversationId: string, rawBody: string): Promise<Re
 async function runAgent(conversationId: string) {
   try {
     if (!aiConfigured) {
-      logAgentEvent({ conversationId, type: "error", detail: "ANTHROPIC_API_KEY is not set." });
+      await logAgentEvent({ conversationId, type: "error", detail: "ANTHROPIC_API_KEY is not set." });
       return;
     }
     // A teammate may have taken over while we were waiting.
-    const conv = getConversation(conversationId);
-    if (!conv?.aiEnabled || !getSettings().agentEnabled) return;
+    const [conv, s] = await Promise.all([getConversation(conversationId), getSettings()]);
+    if (!conv?.aiEnabled || !s.agentEnabled) return;
 
     const r = await generateReply(conversationId);
     if (r.handoff) {
@@ -213,7 +211,7 @@ async function runAgent(conversationId: string) {
     }
     if (!r.text) return;
     await sendWhatsApp({ to: conversationId, body: r.text, author: "ai" });
-    logAgentEvent({
+    await logAgentEvent({
       conversationId,
       type: "reply",
       detail: r.text.slice(0, 200),
@@ -224,6 +222,6 @@ async function runAgent(conversationId: string) {
     });
   } catch (err) {
     console.error("[agent]", err);
-    logAgentEvent({ conversationId, type: "error", detail: err instanceof Error ? err.message : String(err) });
+    await logAgentEvent({ conversationId, type: "error", detail: err instanceof Error ? err.message : String(err) }).catch(console.error);
   }
 }

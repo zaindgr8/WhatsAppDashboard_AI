@@ -1,13 +1,10 @@
 import "server-only";
-import fs from "node:fs";
-import path from "node:path";
 import { EventEmitter } from "node:events";
-import type { AgentEvent, Conversation, DB, Message, Settings } from "./types";
+import type { AgentEvent, Conversation, Message, Settings } from "./types";
+import { q, qList, sb, sbAll } from "./supabase";
 
-// A small JSON-file database. Fine for a single dashboard instance; swap for
-// Postgres/Supabase if you run more than one server.
-const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), "data");
-const DB_FILE = path.join(DATA_DIR, "db.json");
+// All chats, messages, settings and agent activity live in Supabase (see supabase/schema.sql),
+// so every server instance — local or on Vercel — reads the same data and nothing is lost on restart.
 
 export const DEFAULT_SETTINGS: Settings = {
   agentEnabled: true,
@@ -33,198 +30,256 @@ export const DEFAULT_SETTINGS: Settings = {
 A hot lead mentions budget, a timeline, or asks to book a call or meeting.`,
 };
 
-type Global = typeof globalThis & {
-  __waDb?: DB;
-  __waIndex?: Index;
-  __waBus?: EventEmitter;
-  __waSaveTimer?: NodeJS.Timeout;
-};
+type Global = typeof globalThis & { __waBus?: EventEmitter };
 const g = globalThis as Global;
 
+// Live updates for dashboards connected to this server instance. Other instances
+// (e.g. on Vercel) pick changes up through the client's regular refresh.
 export const bus: EventEmitter = g.__waBus ?? (g.__waBus = new EventEmitter());
 bus.setMaxListeners(100);
-
-// Messages grouped per chat and by id, so opening a chat or checking a SID doesn't scan every message.
-interface Index {
-  byConv: Map<string, Message[]>;
-  byId: Map<string, Message>;
-}
-function index(): Index {
-  if (g.__waIndex) return g.__waIndex;
-  const byConv = new Map<string, Message[]>();
-  const byId = new Map<string, Message>();
-  for (const m of load().messages) {
-    byId.set(m.id, m);
-    const list = byConv.get(m.conversationId);
-    if (list) list.push(m);
-    else byConv.set(m.conversationId, [m]);
-  }
-  for (const list of byConv.values()) list.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  return (g.__waIndex = { byConv, byId });
-}
-
-function load(): DB {
-  if (g.__waDb) return g.__waDb;
-  let db: DB;
-  try {
-    db = JSON.parse(fs.readFileSync(DB_FILE, "utf8")) as DB;
-    db.settings = { ...DEFAULT_SETTINGS, ...db.settings };
-  } catch {
-    db = { settings: DEFAULT_SETTINGS, conversations: {}, messages: [], agentEvents: [] };
-  }
-  g.__waDb = db;
-  return db;
-}
-
-function save() {
-  clearTimeout(g.__waSaveTimer);
-  g.__waSaveTimer = setTimeout(() => {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-    const tmp = `${DB_FILE}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(load(), null, 2));
-    fs.renameSync(tmp, DB_FILE);
-  }, 150);
-}
 
 function emit(type: string, conversationId?: string) {
   bus.emit("change", { type, conversationId });
 }
 
-export const db = () => load();
+// Postgres returns "2026-10-15T13:43:34.553+00:00"; the app compares ISO strings, so keep them in "…Z" form.
+const iso = (v: string) => new Date(v).toISOString();
+const isoOpt = (v: string | null) => (v ? iso(v) : undefined);
+
+// ---------- row mapping ----------
+interface ConvRow {
+  id: string;
+  phone: string;
+  profile_name: string;
+  name: string;
+  ai_enabled: boolean;
+  needs_human: boolean;
+  handoff_reason: string | null;
+  status: Conversation["status"];
+  unread: number;
+  tags: string[];
+  notes: string;
+  last_message_at: string;
+  last_message_preview: string;
+  last_inbound_at: string | null;
+  created_at: string;
+  lead: Conversation["lead"] | null;
+}
+
+function toConversation(r: ConvRow): Conversation {
+  return {
+    id: r.id,
+    phone: r.phone,
+    profileName: r.profile_name,
+    name: r.name,
+    aiEnabled: r.ai_enabled,
+    needsHuman: r.needs_human,
+    handoffReason: r.handoff_reason ?? undefined,
+    status: r.status,
+    unread: r.unread,
+    tags: r.tags ?? [],
+    notes: r.notes,
+    lastMessageAt: iso(r.last_message_at),
+    lastMessagePreview: r.last_message_preview,
+    lastInboundAt: isoOpt(r.last_inbound_at),
+    createdAt: iso(r.created_at),
+    lead: r.lead ?? undefined,
+  };
+}
+
+const CONV_COLUMNS: Record<keyof Conversation, keyof ConvRow> = {
+  id: "id",
+  phone: "phone",
+  profileName: "profile_name",
+  name: "name",
+  aiEnabled: "ai_enabled",
+  needsHuman: "needs_human",
+  handoffReason: "handoff_reason",
+  status: "status",
+  unread: "unread",
+  tags: "tags",
+  notes: "notes",
+  lastMessageAt: "last_message_at",
+  lastMessagePreview: "last_message_preview",
+  lastInboundAt: "last_inbound_at",
+  createdAt: "created_at",
+  lead: "lead",
+};
+
+/** Map a partial Conversation to columns. A key set to undefined clears the column. */
+export function conversationRow(patch: Partial<Conversation>): Partial<ConvRow> {
+  const row: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(patch)) {
+    const col = CONV_COLUMNS[k as keyof Conversation];
+    if (col) row[col] = v === undefined ? null : v;
+  }
+  return row as Partial<ConvRow>;
+}
+
+interface MessageRow {
+  id: string;
+  conversation_id: string;
+  direction: Message["direction"];
+  author: Message["author"];
+  body: string;
+  media: Message["media"];
+  status: string;
+  error: string | null;
+  created_at: string;
+}
+
+function toMessage(r: MessageRow): Message {
+  return {
+    id: r.id,
+    conversationId: r.conversation_id,
+    direction: r.direction,
+    author: r.author,
+    body: r.body,
+    media: r.media ?? [],
+    status: r.status,
+    createdAt: iso(r.created_at),
+    ...(r.error ? { error: r.error } : {}),
+  };
+}
+
+interface AgentEventRow {
+  id: string;
+  conversation_id: string;
+  at: string;
+  type: AgentEvent["type"];
+  detail: string;
+  model: string | null;
+  latency_ms: number | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+}
+
+function toAgentEvent(r: AgentEventRow): AgentEvent {
+  return {
+    id: r.id,
+    conversationId: r.conversation_id,
+    at: iso(r.at),
+    type: r.type,
+    detail: r.detail,
+    model: r.model ?? undefined,
+    latencyMs: r.latency_ms ?? undefined,
+    inputTokens: r.input_tokens ?? undefined,
+    outputTokens: r.output_tokens ?? undefined,
+  };
+}
 
 // ---------- settings ----------
-export function getSettings(): Settings {
-  return load().settings;
+export async function getSettings(): Promise<Settings> {
+  const rows = await sb<{ data: Partial<Settings> }[]>("settings?id=eq.1&select=data");
+  return { ...DEFAULT_SETTINGS, ...rows[0]?.data };
 }
-export function updateSettings(patch: Partial<Settings>): Settings {
-  const d = load();
-  d.settings = { ...d.settings, ...patch };
-  save();
+export async function updateSettings(patch: Partial<Settings>): Promise<Settings> {
+  const settings = { ...(await getSettings()), ...patch };
+  await sb("settings?on_conflict=id", { method: "POST", body: { id: 1, data: settings }, prefer: "resolution=merge-duplicates" });
   emit("settings");
-  return d.settings;
+  return settings;
 }
 
 // ---------- conversations ----------
-export function listConversations(): Conversation[] {
-  return Object.values(load().conversations).sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt));
+export async function listConversations(): Promise<Conversation[]> {
+  return (await sbAll<ConvRow>("conversations?select=*&order=last_message_at.desc")).map(toConversation);
 }
-export function getConversation(id: string): Conversation | undefined {
-  return load().conversations[id];
+export async function countConversations(): Promise<number> {
+  return (await sb<{ id: string }[]>("conversations?select=id&limit=1")).length;
+}
+export async function getConversation(id: string): Promise<Conversation | undefined> {
+  const rows = await sb<ConvRow[]>(`conversations?id=eq.${q(id)}&select=*`);
+  return rows[0] ? toConversation(rows[0]) : undefined;
 }
 
-export function ensureConversation(id: string, profileName = ""): Conversation {
-  const d = load();
-  let c = d.conversations[id];
-  if (!c) {
-    const now = new Date().toISOString();
-    c = {
-      id,
-      phone: id.replace(/^whatsapp:/, ""),
-      profileName,
-      name: "",
-      aiEnabled: true,
-      needsHuman: false,
-      status: "open",
-      unread: 0,
-      tags: [],
-      notes: "",
-      lastMessageAt: now,
-      lastMessagePreview: "",
-      createdAt: now,
-    };
-    d.conversations[id] = c;
-    save();
-  } else if (profileName && c.profileName !== profileName) {
-    c.profileName = profileName;
-    save();
+export async function ensureConversation(id: string, profileName = ""): Promise<Conversation> {
+  await sb("conversations?on_conflict=id", {
+    method: "POST",
+    body: { id, phone: id.replace(/^whatsapp:/, ""), profile_name: profileName },
+    prefer: "resolution=ignore-duplicates",
+  });
+  if (profileName) {
+    await sb(`conversations?id=eq.${q(id)}&profile_name=neq.${q(profileName)}`, { method: "PATCH", body: { profile_name: profileName } });
   }
-  return c;
+  return (await getConversation(id))!;
 }
 
-export function updateConversation(id: string, patch: Partial<Conversation>): Conversation | undefined {
-  const d = load();
-  const c = d.conversations[id];
-  if (!c) return undefined;
-  Object.assign(c, patch, { id: c.id });
-  save();
+export async function updateConversation(id: string, patch: Partial<Conversation>): Promise<Conversation | undefined> {
+  const { id: _ignored, ...rest } = patch;
+  void _ignored;
+  const rows = await sb<ConvRow[]>(`conversations?id=eq.${q(id)}`, {
+    method: "PATCH",
+    body: conversationRow(rest),
+    prefer: "return=representation",
+  });
+  if (!rows[0]) return undefined;
   emit("conversation", id);
-  return c;
+  return toConversation(rows[0]);
 }
 
 // ---------- messages ----------
-export function getMessages(conversationId: string): Message[] {
-  return index().byConv.get(conversationId) ?? [];
+export async function getMessages(conversationId: string): Promise<Message[]> {
+  return (await sbAll<MessageRow>(`messages?conversation_id=eq.${q(conversationId)}&select=*&order=created_at.asc`)).map(toMessage);
 }
 
-export function hasMessage(id: string) {
-  return index().byId.has(id);
+export async function allMessages(): Promise<Message[]> {
+  return (await sbAll<MessageRow>("messages?select=*&order=created_at.asc")).map(toMessage);
 }
 
-/** Insert or update a message and keep the conversation summary in sync. */
-export function upsertMessage(msg: Message, opts: { countUnread?: boolean } = {}): Message {
-  const d = load();
-  const idx = index();
-  const existing = idx.byId.get(msg.id);
-  if (existing) {
-    Object.assign(existing, msg);
-  } else {
-    d.messages.push(msg);
-    idx.byId.set(msg.id, msg);
-    const list = idx.byConv.get(msg.conversationId) ?? [];
-    // Keep the chat sorted; new messages almost always belong at the end.
-    let i = list.length;
-    while (i > 0 && list[i - 1].createdAt > msg.createdAt) i--;
-    list.splice(i, 0, msg);
-    idx.byConv.set(msg.conversationId, list);
+/** Status of each message we already have, for the given ids. */
+export async function knownMessageStatuses(ids: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  for (let i = 0; i < ids.length; i += 200) {
+    const chunk = ids.slice(i, i + 200);
+    const rows = await sb<{ id: string; status: string }[]>(`messages?select=id,status&id=in.(${chunk.map(qList).join(",")})`);
+    for (const r of rows) out.set(r.id, r.status);
   }
-  const c = ensureConversation(msg.conversationId);
-  if (msg.createdAt >= c.lastMessageAt || !c.lastMessagePreview) {
-    c.lastMessageAt = msg.createdAt;
-    c.lastMessagePreview = msg.body || (msg.media.length ? "📎 Media" : "");
-  }
-  if (msg.direction === "inbound") {
-    if (!c.lastInboundAt || msg.createdAt > c.lastInboundAt) c.lastInboundAt = msg.createdAt;
-    if (!existing && opts.countUnread) {
-      c.unread += 1;
-      c.status = "open";
-    }
-  }
-  save();
+  return out;
+}
+
+/** Insert or update a message and keep the conversation summary in sync (atomically, in Postgres). */
+export async function upsertMessage(msg: Message, opts: { countUnread?: boolean } = {}): Promise<Message> {
+  await sb("rpc/record_message", { method: "POST", body: { m: msg, count_unread: Boolean(opts.countUnread) } });
   emit("message", msg.conversationId);
-  return existing ?? msg;
+  return msg;
 }
 
-export function updateMessageStatus(id: string, status: string, error?: string) {
-  const m = index().byId.get(id);
-  if (!m || (m.status === status && !error)) return;
-  m.status = status;
-  if (error) m.error = error;
-  save();
-  emit("status", m.conversationId);
+export async function updateMessageStatus(id: string, status: string, error?: string) {
+  const rows = await sb<{ conversation_id: string }[]>(`messages?id=eq.${q(id)}&select=conversation_id`, {
+    method: "PATCH",
+    body: { status, ...(error ? { error } : {}) },
+    prefer: "return=representation",
+  });
+  if (rows[0]) emit("status", rows[0].conversation_id);
 }
 
-export function searchMessages(q: { text?: string; author?: string; from?: string; to?: string; conversationId?: string }) {
-  const text = q.text?.toLowerCase().trim();
-  return load()
-    .messages.filter((m) => {
-      if (q.conversationId && m.conversationId !== q.conversationId) return false;
-      if (q.author && q.author !== "all" && m.author !== q.author) return false;
-      if (q.from && m.createdAt < q.from) return false;
-      if (q.to && m.createdAt > q.to) return false;
-      if (text && !m.body.toLowerCase().includes(text) && !m.conversationId.includes(text)) return false;
-      return true;
-    })
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+export async function searchMessages(f: { text?: string; author?: string; from?: string; to?: string; conversationId?: string }) {
+  const params = ["select=*", "order=created_at.desc"];
+  if (f.conversationId) params.push(`conversation_id=eq.${q(f.conversationId)}`);
+  if (f.author && f.author !== "all") params.push(`author=eq.${q(f.author)}`);
+  if (f.from) params.push(`created_at=gte.${q(f.from)}`);
+  if (f.to) params.push(`created_at=lte.${q(f.to)}`);
+  const text = f.text?.trim();
+  if (text) params.push(`or=(body.ilike.${qList(`*${text}*`)},conversation_id.ilike.${qList(`*${text}*`)})`);
+  return (await sbAll<MessageRow>(`messages?${params.join("&")}`)).map(toMessage);
 }
 
 // ---------- agent activity ----------
-export function logAgentEvent(e: Omit<AgentEvent, "id" | "at">) {
-  const d = load();
-  d.agentEvents.unshift({ ...e, id: crypto.randomUUID(), at: new Date().toISOString() });
-  d.agentEvents = d.agentEvents.slice(0, 1000);
-  save();
+export async function logAgentEvent(e: Omit<AgentEvent, "id" | "at">) {
+  await sb("agent_events", {
+    method: "POST",
+    body: {
+      conversation_id: e.conversationId,
+      type: e.type,
+      detail: e.detail,
+      model: e.model ?? null,
+      latency_ms: e.latencyMs ?? null,
+      input_tokens: e.inputTokens ?? null,
+      output_tokens: e.outputTokens ?? null,
+    },
+  });
   emit("agent", e.conversationId);
 }
-export function listAgentEvents(limit = 100) {
-  return load().agentEvents.slice(0, limit);
+export async function listAgentEvents(limit = 100): Promise<AgentEvent[]> {
+  return (await sb<AgentEventRow[]>(`agent_events?select=*&order=at.desc&limit=${limit}`)).map(toAgentEvent);
 }

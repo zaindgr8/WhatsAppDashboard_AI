@@ -11,10 +11,10 @@ function env() {
 }
 
 export async function GET() {
-  return NextResponse.json({ settings: getSettings(), env: env() });
+  return NextResponse.json({ settings: await getSettings(), env: env() });
 }
 
 export async function PUT(req: Request) {
   const patch = (await req.json()) as Partial<Settings>;
-  return NextResponse.json({ settings: updateSettings(patch), env: env() });
+  return NextResponse.json({ settings: await updateSettings(patch), env: env() });
 }

@@ -32,8 +32,8 @@ function transcript(history: Message[]) {
 }
 
 async function scoreWithClaude(conversationId: string): Promise<Omit<Lead, "analyzedAt" | "source" | "stageLocked">> {
-  const s = getSettings();
-  const text = transcript(getMessages(conversationId).slice(-40));
+  const s = await getSettings();
+  const text = transcript((await getMessages(conversationId)).slice(-40));
   const res = await anthropic.beta.messages.create({
     model: s.model,
     max_tokens: 2000,
@@ -65,8 +65,8 @@ const SIGNALS: [RegExp, number, string][] = [
   [/\b(refund|damaged|complaint|broken|not working)\b/i, -10, "Support issue"],
 ];
 
-function scoreWithRules(conversationId: string): Omit<Lead, "analyzedAt" | "source" | "stageLocked"> {
-  const inbound = getMessages(conversationId).filter((m) => m.direction === "inbound").map((m) => m.body).join("\n");
+async function scoreWithRules(conversationId: string): Promise<Omit<Lead, "analyzedAt" | "source" | "stageLocked">> {
+  const inbound = (await getMessages(conversationId)).filter((m) => m.direction === "inbound").map((m) => m.body).join("\n");
   let score = inbound ? 15 : 0;
   let intent = "General inquiry";
   let best = 0;
@@ -91,10 +91,10 @@ function scoreWithRules(conversationId: string): Omit<Lead, "analyzedAt" | "sour
 
 /** Score a chat as a lead and save it. A stage set by hand (or won/lost) is kept. */
 export async function analyzeLead(conversationId: string): Promise<Lead | undefined> {
-  const conv = getConversation(conversationId);
+  const conv = await getConversation(conversationId);
   if (!conv) return undefined;
   const useAi = aiConfigured;
-  const next = useAi ? await scoreWithClaude(conversationId) : scoreWithRules(conversationId);
+  const next = useAi ? await scoreWithClaude(conversationId) : await scoreWithRules(conversationId);
   const prev = conv.lead;
   const keepStage = prev && (prev.stageLocked || prev.stage === "won" || prev.stage === "lost");
   const lead: Lead = {
@@ -109,7 +109,7 @@ export async function analyzeLead(conversationId: string): Promise<Lead | undefi
     source: useAi ? "ai" : "rules",
     analyzedAt: new Date().toISOString(),
   };
-  updateConversation(conversationId, { lead });
+  await updateConversation(conversationId, { lead });
   return lead;
 }
 
@@ -118,8 +118,8 @@ const DEBOUNCE_MS = Number(process.env.LEAD_DEBOUNCE_MS ?? 6000);
 const g = globalThis as typeof globalThis & { __leadTimers?: Map<string, NodeJS.Timeout> };
 const timers = (g.__leadTimers ??= new Map());
 
-export function scheduleLeadAnalysis(conversationId: string) {
-  if (!getSettings().leadScoring) return;
+export async function scheduleLeadAnalysis(conversationId: string) {
+  if (!(await getSettings()).leadScoring) return;
   clearTimeout(timers.get(conversationId));
   timers.set(conversationId, setTimeout(() => {
     timers.delete(conversationId);
@@ -128,10 +128,10 @@ export function scheduleLeadAnalysis(conversationId: string) {
 }
 
 /** Score chats that have never been scored (e.g. right after upgrading or a history import), one at a time. */
-export function backfillLeads() {
+export async function backfillLeads() {
   const gg = g as typeof g & { __leadBackfill?: boolean };
-  if (gg.__leadBackfill || !getSettings().leadScoring) return;
-  const todo = listConversations().filter((c) => !c.lead && c.lastInboundAt).map((c) => c.id);
+  if (gg.__leadBackfill || !(await getSettings()).leadScoring) return;
+  const todo = (await listConversations()).filter((c) => !c.lead && c.lastInboundAt).map((c) => c.id);
   if (!todo.length) return;
   gg.__leadBackfill = true;
   void (async () => {

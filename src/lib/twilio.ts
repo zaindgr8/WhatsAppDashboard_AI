@@ -1,7 +1,7 @@
 import "server-only";
 import twilio from "twilio";
 import type { Author, Message } from "./types";
-import { getSettings, hasMessage, updateMessageStatus, upsertMessage } from "./store";
+import { getSettings, knownMessageStatuses, updateMessageStatus, upsertMessage } from "./store";
 import { scheduleLeadAnalysis } from "./leads";
 
 const SID = process.env.TWILIO_ACCOUNT_SID;
@@ -67,14 +67,14 @@ export async function sendWhatsApp({ to, body = "", author, contentSid, contentV
     return upsertMessage({ ...base, id: msg.sid, status: msg.status, body: msg.body || base.body });
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
-    upsertMessage({ ...base, id: `failed_${crypto.randomUUID()}`, status: "failed", error });
+    await upsertMessage({ ...base, id: `failed_${crypto.randomUUID()}`, status: "failed", error });
     throw err;
   }
 }
 
 /** Import past WhatsApp messages from Twilio's message log into the dashboard. */
 export async function importHistory(limit = 1000, since?: Date) {
-  const automation = getSettings().agentMode === "n8n";
+  const automation = (await getSettings()).agentMode === "n8n";
   const c = client();
   const ours = new Set([WHATSAPP_FROM].filter(Boolean));
   const [sent, received] = await Promise.all([
@@ -82,14 +82,16 @@ export async function importHistory(limit = 1000, since?: Date) {
     WHATSAPP_FROM ? c.messages.list({ to: WHATSAPP_FROM, limit, dateSentAfter: since }) : Promise.resolve([]),
   ]);
 
+  const all = [...sent, ...received];
+  const known = await knownMessageStatuses(all.map((m) => m.sid));
   let imported = 0;
-  for (const m of [...sent, ...received]) {
+  for (const m of all) {
     if (!m.from?.startsWith("whatsapp:") && !m.to?.startsWith("whatsapp:")) continue;
     const inbound = m.direction === "inbound" || (ours.size > 0 && ours.has(m.to));
     const customer = inbound ? m.from : m.to;
     // Keep messages we already know (they carry the right author, e.g. "ai"); just refresh status.
-    if (hasMessage(m.sid)) {
-      updateMessageStatus(m.sid, m.status);
+    if (known.has(m.sid)) {
+      if (known.get(m.sid) !== m.status) await updateMessageStatus(m.sid, m.status);
       continue;
     }
     const media =
@@ -99,7 +101,7 @@ export async function importHistory(limit = 1000, since?: Date) {
             contentType: x.contentType,
           }))
         : [];
-    upsertMessage({
+    await upsertMessage({
       id: m.sid,
       conversationId: customer,
       direction: inbound ? "inbound" : "outbound",
@@ -111,7 +113,7 @@ export async function importHistory(limit = 1000, since?: Date) {
       createdAt: (m.dateSent ?? m.dateCreated).toISOString(),
       error: m.errorMessage ?? undefined,
     }, { countUnread: inbound && Boolean(since) });
-    if (inbound && since) scheduleLeadAnalysis(customer);
+    if (inbound && since) await scheduleLeadAnalysis(customer);
     imported++;
   }
   return imported;

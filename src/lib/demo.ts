@@ -1,12 +1,12 @@
 import "server-only";
-import { db, ensureConversation, updateConversation, upsertMessage, logAgentEvent } from "./store";
+import { countConversations, ensureConversation, updateConversation, upsertMessage, logAgentEvent } from "./store";
 import { twilioConfigured } from "./twilio";
 import type { Author, Lead } from "./types";
 
 /** Fill an empty dashboard with sample chats so you can explore it before connecting Twilio. */
-export function seedDemoIfEmpty() {
+export async function seedDemoIfEmpty() {
   if (twilioConfigured || process.env.DISABLE_DEMO === "true") return;
-  if (Object.keys(db().conversations).length) return;
+  if (await countConversations()) return;
 
   const now = Date.now();
   const min = 60_000;
@@ -62,9 +62,9 @@ export function seedDemoIfEmpty() {
 
   for (const c of chats) {
     const id = `whatsapp:${c.phone}`;
-    ensureConversation(id, c.name);
-    c.msgs.forEach(([author, body, agoMin], i) => {
-      upsertMessage(
+    await ensureConversation(id, c.name);
+    for (const [i, [author, body, agoMin]] of c.msgs.entries()) {
+      await upsertMessage(
         {
           id: `demo_${c.phone}_${i}`,
           conversationId: id,
@@ -77,9 +77,9 @@ export function seedDemoIfEmpty() {
         },
         { countUnread: author === "customer" && agoMin < 20 },
       );
-      if (author === "ai") logAgentEvent({ conversationId: id, type: "reply", detail: body, model: "claude-opus-5-5", latencyMs: 1400 + i * 120, inputTokens: 900, outputTokens: 60 });
-    });
-    updateConversation(id, {
+      if (author === "ai") await logAgentEvent({ conversationId: id, type: "reply", detail: body, model: "claude-opus-5-5", latencyMs: 1400 + i * 120, inputTokens: 900, outputTokens: 60 });
+    }
+    await updateConversation(id, {
       aiEnabled: c.ai, needsHuman: !!c.needsHuman, handoffReason: c.reason,
       status: c.lead.stage === "won" || c.lead.stage === "lost" ? "resolved" : "open",
       lead: { stage: "new", score: 0, intent: "", summary: "", interest: "", budget: "", email: "", company: "", nextStep: "", ...c.lead, source: "ai", analyzedAt: new Date().toISOString() },

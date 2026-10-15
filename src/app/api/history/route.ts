@@ -5,14 +5,14 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
   const p = new URL(req.url).searchParams;
-  const results = searchMessages({
+  const results = await searchMessages({
     text: p.get("q") || undefined,
     author: p.get("author") || undefined,
     from: p.get("from") || undefined,
     to: p.get("to") ? `${p.get("to")}T23:59:59.999Z` : undefined,
     conversationId: p.get("conversation") || undefined,
   });
-  const names = Object.fromEntries(listConversations().map((c) => [c.id, c.name || c.profileName || c.phone]));
+  const names = Object.fromEntries((await listConversations()).map((c) => [c.id, c.name || c.profileName || c.phone]));
   const rows = results.map((m) => ({ ...m, contact: names[m.conversationId] ?? m.conversationId.replace("whatsapp:", "") }));
 
   if (p.get("format") === "csv") {
