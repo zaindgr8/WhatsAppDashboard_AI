@@ -78,3 +78,13 @@ Note: n8n doesn't see the messages you send from the dashboard, so its memory of
 All data lives in Supabase, so it works on Vercel or any other host. Add `SUPABASE_URL` and `SUPABASE_SECRET_KEY` to the host's environment variables. To copy chats from an older install's `storage/db.json`, run `node --env-file=.env.local scripts/migrate-to-supabase.mjs`.
 
 On Vercel, new messages sent by n8n are pulled from Twilio whenever the dashboard refreshes (about every 20 seconds), because background timers don't run between requests there.
+
+## Leads (Freya's WhatsApp lead log)
+
+The **Leads** page replaces the "Freya - WhatsApp Leads" Google Sheet. It shows the same columns:
+phone, name, wa_name, query, association, interest, business_owner, stage, handoff, notes and last_seen.
+
+- The n8n workflow *(DM Inbound) WhatsApp - Freya* rewrites each lead's profile after every message. Its
+  **Sync Lead to Dashboard** step upserts the row into the `wa_leads` table in the dashboard's own
+  Supabase project (created by `supabase/schema.sql`).
+- Filter by stage, interest or handoff, open a lead for full notes, jump to the chat, or export CSV.

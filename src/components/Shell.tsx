@@ -2,17 +2,18 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BarChart3, Bot, History, Kanban, LogOut, MessageCircle, Moon, Search, Sun, Zap } from "lucide-react";
+import { BarChart3, Bot, History, Kanban, LogOut, MessageCircle, Moon, Search, Sun, Users, Zap } from "lucide-react";
 import { api, displayName, useLive } from "@/lib/client";
 import type { Conversation } from "@/lib/types";
 import { Avatar, Logo, ScoreRing } from "./ui";
 
 const NAV = [
   { href: "/", label: "Inbox", icon: MessageCircle, key: "1" },
-  { href: "/pipeline", label: "Pipeline", icon: Kanban, key: "2" },
-  { href: "/history", label: "History", icon: History, key: "3" },
-  { href: "/agent", label: "Agent", icon: Bot, key: "4" },
-  { href: "/analytics", label: "Analytics", icon: BarChart3, key: "5" },
+  { href: "/leads", label: "Leads", icon: Users, key: "2" },
+  { href: "/pipeline", label: "Pipeline", icon: Kanban, key: "3" },
+  { href: "/history", label: "History", icon: History, key: "4" },
+  { href: "/agent", label: "Agent", icon: Bot, key: "5" },
+  { href: "/analytics", label: "Analytics", icon: BarChart3, key: "6" },
 ];
 
 type Env = { twilioConfigured: boolean; aiConfigured: boolean; demo: boolean; whatsappFrom: string };
@@ -63,7 +64,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPalette((p) => !p); }
-      else if (e.altKey && !e.metaKey && !e.ctrlKey && /^Digit[1-5]$/.test(e.code)) { e.preventDefault(); router.push(NAV[Number(e.code.slice(5)) - 1].href); }
+      else if (e.altKey && !e.metaKey && !e.ctrlKey && /^Digit[1-6]$/.test(e.code)) { e.preventDefault(); router.push(NAV[Number(e.code.slice(5)) - 1].href); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
